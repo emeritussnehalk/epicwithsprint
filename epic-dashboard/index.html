@@ -1,0 +1,485 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Epic Dashboard</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    body { font-family: 'Inter', sans-serif; background-color: #f8fafc; }
+    .epic-card { border-left: 4px solid #3b82f6; transition: all 0.2s ease; }
+    .epic-card:hover { transform: translateY(-2px); box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
+    .epic-card.selected { border-left-color: #10b981; background-color: #f0fdf4; }
+    .file-drop-area {
+      border: 2px dashed #cbd5e1;
+      border-radius: 8px;
+      padding: 20px;
+      text-align: center;
+      transition: all 0.3s ease;
+    }
+    .file-drop-area:hover, .file-drop-area.active {
+      border-color: #3b82f6;
+      background-color: #f0f7ff;
+    }
+    .mode-toggle-btn {
+      padding: 0.5rem 1rem;
+      border-radius: 0.375rem;
+      font-size: 0.875rem;
+      font-weight: 500;
+      border: 1px solid #cbd5e1;
+      background-color: #ffffff;
+      color: #334155;
+      cursor: pointer;
+      transition: all 0.15s ease;
+    }
+    .mode-toggle-btn.active { background-color: #3b82f6; color: #ffffff; border-color: #3b82f6; }
+    .loading {
+      position: fixed;
+      top: 0; left: 0;
+      width: 100%; height: 100%;
+      background-color: rgba(255,255,255,0.8);
+      display: flex; justify-content: center; align-items: center;
+      z-index: 1000;
+    }
+    .spinner {
+      width: 40px; height: 40px;
+      border: 4px solid #f3f3f3;
+      border-top: 4px solid #3b82f6;
+      border-radius: 50%;
+      animation: spin 1s linear infinite;
+    }
+    @keyframes spin { 0% { transform: rotate(0deg);} 100% { transform: rotate(360deg);} }
+  </style>
+</head>
+<body class="bg-slate-50">
+  <div class="p-6 max-w-6xl mx-auto">
+    <h1 class="text-3xl font-bold text-gray-800 mb-6">Epic Detail Dashboard</h1>
+
+    <!-- Source toggle -->
+    <div id="file-upload-section" class="mb-8 space-y-4">
+      <div class="flex flex-wrap items-center gap-3">
+        <span class="text-sm text-slate-600">Data source:</span>
+        <button type="button" class="mode-toggle-btn active" data-mode-toggle="json">Use JSON file</button>
+        <button type="button" class="mode-toggle-btn" data-mode-toggle="api">Use Jira API</button>
+      </div>
+
+      <!-- JSON mode panel -->
+      <div id="json-mode-panel">
+        <div class="file-drop-area" id="drop-area">
+          <h2 class="text-lg font-semibold text-gray-800 mb-2">Upload JSON export</h2>
+          <p class="text-gray-500 mb-2 text-sm">Drag & drop your JSON file here or browse.</p>
+          <input accept=".json" class="hidden" id="fileInput" type="file" />
+          <button
+            class="bg-blue-500 hover:bg-blue-600 text-white font-medium py-2 px-4 rounded"
+            onclick="document.getElementById('fileInput').click()">
+            Browse Files
+          </button>
+        </div>
+      </div>
+
+      <!-- Jira API mode panel -->
+      <div id="api-mode-panel" class="hidden">
+        <div class="p-4 border border-slate-200 rounded-lg bg-white space-y-3">
+          <h2 class="text-lg font-semibold text-gray-800 mb-2">Fetch from Jira API (via proxy)</h2>
+          <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1">Jira Site URL</label>
+            <input id="jira-url" type="text"
+                   placeholder="https://emeritus.atlassian.net"
+                   class="w-full p-2 border border-gray-300 rounded-md" />
+          </div>
+          <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1">Email (Jira login)</label>
+            <input id="jira-email" type="email"
+                   placeholder="you@emeritus.org"
+                   class="w-full p-2 border border-gray-300 rounded-md" />
+          </div>
+          <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1">API Token</label>
+            <input id="jira-token" type="password"
+                   placeholder="Jira API token"
+                   class="w-full p-2 border border-gray-300 rounded-md" />
+          </div>
+          <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1">JQL</label>
+            <input id="jira-jql" type="text"
+                   placeholder="project = PEJ AND issuetype in (Epic, Story)"
+                   class="w-full p-2 border border-gray-300 rounded-md" />
+          </div>
+          <button
+            id="jira-fetch-btn"
+            class="mt-2 bg-emerald-500 hover:bg-emerald-600 text-white font-medium py-2 px-4 rounded w-full">
+            Fetch from Jira
+          </button>
+          <p class="text-xs text-slate-500 mt-1">
+            This calls your own proxy backend (Render/Railway) which then talks to Jira.
+          </p>
+        </div>
+      </div>
+    </div>
+
+    <!-- Dashboard content -->
+    <div id="dashboard-content" class="hidden space-y-6">
+      <div class="bg-white rounded-lg shadow p-4">
+        <div class="flex items-center justify-between mb-2">
+          <h2 class="text-xl font-semibold text-gray-800">Epics</h2>
+          <p class="text-xs text-gray-500"><span id="epic-count">0</span> epics found</p>
+        </div>
+        <div id="epic-list" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4"></div>
+      </div>
+
+      <div class="bg-white rounded-lg shadow p-4">
+        <h2 class="text-xl font-semibold text-gray-800 mb-2">Epic Details</h2>
+        <div id="epic-details" class="text-sm text-slate-700">Select an epic to see its user stories.</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="loading hidden" id="loading">
+    <div class="spinner"></div>
+  </div>
+
+<script>
+  let allData = [];
+  let epics = [];
+  let selectedEpicId = null;
+
+  // ---------- MODE TOGGLE ----------
+  (function initModeToggle() {
+    const jsonPanel = document.getElementById('json-mode-panel');
+    const apiPanel = document.getElementById('api-mode-panel');
+    const buttons = document.querySelectorAll('[data-mode-toggle]');
+
+    function setMode(mode) {
+      buttons.forEach(btn => {
+        const isActive = btn.getAttribute('data-mode-toggle') === mode;
+        btn.classList.toggle('active', isActive);
+      });
+      if (mode === 'json') {
+        jsonPanel.classList.remove('hidden');
+        apiPanel.classList.add('hidden');
+      } else {
+        jsonPanel.classList.add('hidden');
+        apiPanel.classList.remove('hidden');
+      }
+    }
+
+    buttons.forEach(btn => {
+      btn.addEventListener('click', () => {
+        const mode = btn.getAttribute('data-mode-toggle');
+        setMode(mode);
+      });
+    });
+
+    setMode('json');
+  })();
+
+  // ---------- JSON UPLOAD ----------
+  document.getElementById('fileInput').addEventListener('change', handleFileSelect);
+  document.getElementById('drop-area').addEventListener('drop', handleDrop, false);
+  ['dragenter','dragover','dragleave','drop'].forEach(eventName => {
+    document.getElementById('drop-area').addEventListener(eventName, e => {
+      e.preventDefault();
+      e.stopPropagation();
+    }, false);
+  });
+
+  function handleFileSelect(e) { handleFiles(e.target.files); }
+  function handleDrop(e) { handleFiles(e.dataTransfer.files); }
+
+  function handleFiles(files) {
+    if (!files || files.length === 0) return;
+    const file = files[0];
+    if (!(file.type === 'application/json' || file.name.endsWith('.json'))) {
+      alert('Please upload a JSON file.');
+      return;
+    }
+    document.getElementById('loading').classList.remove('hidden');
+    const reader = new FileReader();
+    reader.onload = function(evt) {
+      try {
+        const jsonData = JSON.parse(evt.target.result);
+        processData(jsonData);
+        showDashboard();
+      } catch (err) {
+        alert('Error parsing JSON: ' + err.message);
+      } finally {
+        document.getElementById('loading').classList.add('hidden');
+      }
+    };
+    reader.readAsText(file);
+  }
+
+  function showDashboard() {
+    document.getElementById('file-upload-section').classList.add('hidden');
+    document.getElementById('dashboard-content').classList.remove('hidden');
+  }
+
+  function convertJiraDate(jiraDateString) {
+    if (!jiraDateString) return "";
+    const d = new Date(jiraDateString);
+    if (isNaN(d.getTime())) return jiraDateString;
+    const day = String(d.getDate()).padStart(2, '0');
+    const month = String(d.getMonth() + 1).padStart(2, '0');
+    const year = d.getFullYear();
+    return `${day}/${month}/${year}`;
+  }
+
+  // ---------- PROCESS DATA ----------
+  function processData(data) {
+    allData = Array.isArray(data) ? data : [data];
+    const epicMap = new Map();
+
+    // Seed epics
+    allData.forEach(item => {
+      if (item["Issue Type"] === "Epic") {
+        epicMap.set(String(item["Issue key"]), {
+          id: String(item["Issue key"]),
+          summary: item["Summary"] || "Unknown Epic",
+          dueDate: item["Custom field (Due Date)"] || "",
+          productManager: item["Custom field (Product Manager)"] || "Not Assigned",
+          stories: [],
+          totalStoryPoints: 0
+        });
+      }
+    });
+
+    // Attach stories
+    allData.forEach(item => {
+      if (item["Issue Type"] === "Story" && item["Parent key"]) {
+        const epicId = String(item["Parent key"]);
+        if (!epicMap.has(epicId)) {
+          epicMap.set(epicId, {
+            id: epicId,
+            summary: item["Parent summary"] || "Unknown Epic",
+            dueDate: "",
+            productManager: "Not Assigned",
+            stories: [],
+            totalStoryPoints: 0
+          });
+        }
+        const epic = epicMap.get(epicId);
+        const sp = parseFloat(item["Custom field (Story Points)__1"] || 0) || 0;
+        epic.stories.push({
+          issueKey: item["Issue key"] || "",
+          summary: item.Summary || "",
+          sprint: item.Sprint || "Not Assigned",
+          status: item.Status || "Not Assigned",
+          storyPoints: sp,
+          university: item["Custom field (University Name)"] || "Not Assigned",
+          skillSet: item["Custom field (Skill Set)"] || "Not Assigned",
+          productManager: item["Custom field (Product Manager)"] || "Not Assigned",
+          dueDate: item["Custom field (Due Date)"] || ""
+        });
+        epic.totalStoryPoints += sp;
+      }
+    });
+
+    epics = Array.from(epicMap.values());
+    renderEpicList();
+  }
+
+  function renderEpicList() {
+    const epicList = document.getElementById("epic-list");
+    const epicCount = document.getElementById("epic-count");
+    epicList.innerHTML = "";
+    epicCount.textContent = epics.length;
+
+    epics.forEach(epic => {
+      const card = document.createElement("button");
+      card.type = "button";
+      card.className = "epic-card text-left w-full bg-white rounded-md shadow-sm p-4 " +
+        (selectedEpicId === epic.id ? "selected" : "");
+      const dueDate = epic.dueDate ? convertJiraDate(epic.dueDate) : "No due date";
+
+      card.innerHTML = `
+        <div class="flex flex-col gap-1">
+          <div class="flex justify-between items-center">
+            <h3 class="font-semibold text-gray-800 text-sm mr-2 truncate" title="${epic.summary}">${epic.summary}</h3>
+            <span class="text-xs px-2 py-1 rounded-full bg-slate-100 text-slate-700 font-mono">${epic.id}</span>
+          </div>
+          <p class="text-xs text-gray-600">PM: <span class="font-medium">${epic.productManager}</span></p>
+          <p class="text-xs text-gray-600">Story Points: <span class="font-medium">${epic.totalStoryPoints}</span></p>
+          <p class="text-xs text-gray-600">Stories: <span class="font-medium">${epic.stories.length}</span></p>
+          <p class="text-xs text-gray-500 mt-1">Due: ${dueDate}</p>
+        </div>
+      `;
+      card.addEventListener("click", () => {
+        selectedEpicId = epic.id;
+        renderEpicList();
+        renderEpicDetails(epic.id);
+      });
+      epicList.appendChild(card);
+    });
+
+    if (!selectedEpicId && epics.length > 0) {
+      selectedEpicId = epics[0].id;
+      renderEpicDetails(selectedEpicId);
+      if (epicList.firstChild) epicList.firstChild.classList.add("selected");
+    }
+  }
+
+  function renderEpicDetails(epicId) {
+    const container = document.getElementById("epic-details");
+    const epic = epics.find(e => e.id === epicId);
+    if (!epic) {
+      container.textContent = "No epic selected.";
+      return;
+    }
+    const dueDate = epic.dueDate ? convertJiraDate(epic.dueDate) : "No due date";
+
+    const headerHtml = `
+      <div class="border-l-4 border-emerald-500 bg-emerald-50 p-4 rounded mb-4">
+        <div class="flex flex-wrap items-center justify-between gap-2 mb-1">
+          <h3 class="text-lg font-bold text-emerald-800">${epic.summary}</h3>
+          <span class="text-xs px-2 py-1 rounded-full bg-emerald-100 text-emerald-800 font-mono">${epic.id}</span>
+        </div>
+        <p class="text-xs text-slate-700 mb-1">Product Manager: <span class="font-medium">${epic.productManager}</span></p>
+        <p class="text-xs text-slate-700 mb-1">Total Story Points: <span class="font-medium">${epic.totalStoryPoints}</span></p>
+        <p class="text-xs text-slate-700 mb-1">User Stories: <span class="font-medium">${epic.stories.length}</span></p>
+        <p class="text-xs text-slate-700">Due Date: <span class="font-medium">${dueDate}</span></p>
+      </div>
+    `;
+
+    const rowsHtml = epic.stories.map(s => `
+      <tr class="border-t border-slate-100 hover:bg-slate-50">
+        <td class="px-2 py-1 font-mono text-xs whitespace-nowrap">${s.issueKey}</td>
+        <td class="px-2 py-1 text-xs">${s.summary}</td>
+        <td class="px-2 py-1 text-xs whitespace-nowrap">${s.sprint}</td>
+        <td class="px-2 py-1 text-xs whitespace-nowrap">${s.status}</td>
+        <td class="px-2 py-1 text-xs text-right whitespace-nowrap">${s.storyPoints}</td>
+        <td class="px-2 py-1 text-xs whitespace-nowrap">${s.university}</td>
+        <td class="px-2 py-1 text-xs whitespace-nowrap">${s.skillSet}</td>
+      </tr>
+    `).join("");
+
+    const tableHtml = `
+      <div class="overflow-x-auto">
+        <table class="min-w-full text-xs text-left text-slate-800 border border-slate-100 rounded-md overflow-hidden">
+          <thead class="bg-slate-50">
+            <tr>
+              <th class="px-2 py-2">Issue Key</th>
+              <th class="px-2 py-2">Summary</th>
+              <th class="px-2 py-2">Sprint</th>
+              <th class="px-2 py-2">Status</th>
+              <th class="px-2 py-2 text-right">SP</th>
+              <th class="px-2 py-2">University</th>
+              <th class="px-2 py-2">Skill Set</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${rowsHtml}
+          </tbody>
+        </table>
+      </div>
+    `;
+
+    container.innerHTML = headerHtml + tableHtml;
+  }
+
+  // ---------- JIRA API VIA PROXY ----------
+  document.getElementById('jira-fetch-btn').addEventListener('click', fetchFromJira);
+
+  async function fetchFromJira() {
+    const baseUrl = document.getElementById('jira-url').value.trim().replace(/\/$/, '');
+    const email = document.getElementById('jira-email').value.trim();
+    const token = document.getElementById('jira-token').value.trim();
+    const jql = document.getElementById('jira-jql').value.trim() ||
+      'project = PEJ AND issuetype in (Epic, Story) ORDER BY created DESC';
+
+    if (!baseUrl || !email || !token) {
+      alert('Please fill Jira URL, email and API token.');
+      return;
+    }
+
+    document.getElementById('loading').classList.remove('hidden');
+
+    try {
+      const resp = await fetch("https://YOUR_PROXY_URL_HERE/jira-search", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ baseUrl, email, token, jql })
+      });
+
+      if (!resp.ok) {
+        const text = await resp.text();
+        throw new Error("Proxy/Jira error: " + resp.status + " " + text);
+      }
+
+      const data = await resp.json(); // Jira search response
+      const normalized = data.issues.map(mapJiraIssueToDashboardShape);
+      processData(normalized);
+      showDashboard();
+    } catch (err) {
+      console.error(err);
+      alert("Error calling Jira via proxy: " + err.message);
+    } finally {
+      document.getElementById('loading').classList.add('hidden');
+    }
+  }
+
+  // ---------- MAP JIRA FIELDS -> EXPORT SHAPE ----------
+  function mapJiraIssueToDashboardShape(issue) {
+    const f = issue.fields || {};
+
+    // From your Jira metadata:
+    // Story Points         -> customfield_10046
+    // Product Manager      -> customfield_10553 (user)
+    // University Name      -> customfield_10718 (array of options)
+    // Skill Set            -> customfield_10719 (single option)
+    // Sprint               -> customfield_10021 (array)
+    // Custom Due Date      -> customfield_10720
+    const STORY_POINTS_FIELD    = "customfield_10046";
+    const PRODUCT_MANAGER_FIELD = "customfield_10553";
+    const UNIVERSITY_FIELD      = "customfield_10718";
+    const SKILLSET_FIELD        = "customfield_10719";
+    const SPRINT_FIELD          = "customfield_10021";
+    const DUE_DATE_FIELD        = "customfield_10720";
+
+    const spRaw = f[STORY_POINTS_FIELD];
+    const storyPoints = typeof spRaw === "number" ? spRaw : parseFloat(spRaw || 0) || 0;
+
+    let pmName = "";
+    const pmVal = f[PRODUCT_MANAGER_FIELD];
+    if (pmVal && pmVal.displayName) pmName = pmVal.displayName;
+
+    let uniName = "";
+    const uniVal = f[UNIVERSITY_FIELD];
+    if (Array.isArray(uniVal) && uniVal.length) {
+      uniName = uniVal.map(u => u && u.value ? u.value : "").filter(Boolean).join(", ");
+    }
+
+    let skillName = "";
+    const skillVal = f[SKILLSET_FIELD];
+    if (skillVal && skillVal.value) {
+      skillName = skillVal.value;
+    }
+
+    let sprintName = "";
+    const sprintVal = f[SPRINT_FIELD];
+    if (Array.isArray(sprintVal) && sprintVal.length) {
+      sprintName = sprintVal[0].name || "";
+    }
+
+    const parent = f.parent || null;
+    const dueDate = f[DUE_DATE_FIELD] || "";
+
+    return {
+      "Issue key": issue.key,
+      "Issue Type": f.issuetype ? f.issuetype.name : "",
+      "Summary": f.summary || "",
+      "Status": f.status ? f.status.name : "",
+      "Parent key": parent ? parent.key : "",
+      "Parent summary": parent && parent.fields ? parent.fields.summary : "",
+      "Sprint": sprintName,
+      "Custom field (Story Points)__1": storyPoints,
+      "Custom field (Product Manager)": pmName,
+      "Custom field (University Name)": uniName,
+      "Custom field (Skill Set)": skillName,
+      "Custom field (Due Date)": dueDate
+    };
+  }
+</script>
+
+</body>
+</html>
